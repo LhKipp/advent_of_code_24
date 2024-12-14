@@ -1,12 +1,10 @@
 use itertools::Itertools;
 use regex::Regex;
-use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead};
-use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct PointVelocity {
     p: (i32, i32), // Point (x, y)
     v: (i32, i32), // Velocity (vx, vy)
@@ -48,9 +46,12 @@ const TALL: i32 = 103;
 // const WIDE: i32 = 11;
 // const TALL: i32 = 7;
 
-fn move_robot(r: &PointVelocity) -> PointVelocity {
+fn move_robot(r: &PointVelocity, sec: i32) -> PointVelocity {
     PointVelocity {
-        p: ((r.p.0 + r.v.0 * 100).rem_euclid(WIDE), (r.p.1 + r.v.1 * 100).rem_euclid(TALL)),
+        p: (
+            (r.p.0 + r.v.0 * sec).rem_euclid(WIDE),
+            (r.p.1 + r.v.1 * sec).rem_euclid(TALL),
+        ),
         v: r.v,
     }
 }
@@ -87,14 +88,58 @@ fn main() {
     let file_path = std::env::args().nth(1).unwrap();
 
     let robots = parse_input(&file_path).unwrap();
-    let moved = robots.iter().map(move_robot).collect_vec();
-    print_points_on_plane(&moved);
-    let x = moved
-        .iter()
-        .filter_map(get_quadrant)
-        .fold(HashMap::new(), |mut acc, item| {
-            *acc.entry(item).or_insert(0) += 1;
-            acc
-        });
-    println!("{}", x.values().product::<i32>())
+
+    let mut cur_min = 100000000000_usize;
+    for x in 1..10000 {
+        let moved = robots.iter().map(|r| move_robot(r, x)).collect_vec();
+        let danger = moved
+            .iter()
+            .filter_map(get_quadrant)
+            .fold(HashMap::new(), |mut acc, item| {
+                *acc.entry(item).or_insert(0) += 1;
+                acc
+            })
+            .values()
+            .product::<i32>();
+        if (danger as usize) < cur_min {
+            cur_min = danger as usize;
+            println!("AFTER {} seconds", x);
+            print_points_on_plane(&moved);
+        }
+    }
 }
+
+// :)
+// ###############################
+// #.............................#
+// #.............................#
+// #.............................#
+// #.............................#
+// #..............#..............#
+// #.............###.............#
+// #............#####............#
+// #...........#######...........#
+// #..........#########..........#
+// #............#####............#
+// #...........#######...........#
+// #..........#########..........#
+// #.........###########.........#
+// #........#############........#
+// #..........#########..........#
+// #.........###########.........#
+// #........#############........#
+// #.......###############.......#
+// #......#################......#
+// #........#############........#
+// #.......###############.......#
+// #......#################......#
+// #.....###################.....#
+// #....#####################....#
+// #.............###.............#
+// #.............###.............#
+// #.............###.............#
+// #.............................#
+// #.............................#
+// #.............................#
+// #.............................#
+// ###############################
