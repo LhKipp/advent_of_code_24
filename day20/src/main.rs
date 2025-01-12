@@ -1,15 +1,11 @@
-use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, BufRead};
-use std::sync::atomic::{AtomicI32, Ordering};
 
-use itertools::Itertools;
-use petgraph::algo::astar;
+use petgraph::algo::{astar, dijkstra};
 use petgraph::graph::{NodeIndex, UnGraph};
-use rayon::iter::IntoParallelRefIterator;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct Pos {
@@ -38,13 +34,6 @@ const DIRECTIONS: [(isize, isize); 4] = [
     (0, -1), // up
     (0, 1),  // down
 ];
-
-// fn is_visitable(nodeidx: &[Vec<Option<NIdx>>], x: usize, y: usize) -> bool {
-//     return nodeidx
-//         .get(x)
-//         .and_then(|v| v.get(y).cloned())
-//         .is_some_and(|v| v.is_some());
-// }
 
 fn graph_for(grid: &Vec<Vec<char>>) -> (G, HashMap<Pos, NIdx>) {
     let mut graph = G::new_undirected();
@@ -99,68 +88,71 @@ fn start_and_end(grid: &Vec<Vec<char>>) -> (Pos, Pos) {
     (start, end)
 }
 
-fn shortest_path(
-    mut graph: G,
-    idx: &HashMap<Pos, NIdx>,
-    start_end: (Pos, Pos),
-    skip: Option<(Pos, Pos)>,
-) -> i32 {
-    if let Some(skip) = skip {
-        graph.add_edge(idx[&skip.0], idx[&skip.1], 2);
-    }
-
-    let path = astar(
-        &graph,
-        idx[&start_end.0],
-        |finish| finish == idx[&start_end.1],
-        |e| *e.weight(),
-        |_| 1,
-    )
-    .unwrap();
-    path.0
+fn cityblock_distance(x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
+    (x1 - x2).abs() + (y1 - y2).abs()
 }
 
-fn find_skips(grid: &Vec<Vec<char>>) -> HashSet<(Pos, Pos)> {
-    let mut results: HashSet<(Pos, Pos)> = HashSet::new();
+fn find_positions_within_distance(x_t: i32, y_t: i32, max_distance: i32) -> Vec<(i32, i32)> {
+    let mut positions = Vec::new();
 
-    for y in 0..grid.len() {
-        for x in 0..grid[y].len() {
-            if !VISITABLE.contains(&grid[y][x]) {
-                continue;
+    // Iterate through x values around the target
+    for x in (x_t - max_distance)..=(x_t + max_distance) {
+        // Calculate the maximum possible distance for y given the x value
+        let max_y_distance = max_distance - (x_t - x).abs();
+
+        // Iterate through y values that are within the allowable cityblock distance
+        for y in (y_t - max_y_distance)..=(y_t + max_y_distance) {
+            if cityblock_distance(x_t, y_t, x, y) <= max_distance {
+                positions.push((x, y));
             }
-
-            let start = Pos { x, y };
-            itertools::repeat_n(DIRECTIONS, 2)
-                .multi_cartesian_product()
-                .for_each(|comb| {
-                    let (first, second) = (comb[0], comb[1]);
-                    let dy = first.0 + second.0;
-                    let dx = first.1 + second.1;
-                    if dy == 0 && dx == 0 {
-                        return;
-                    }
-                    let nx = x as isize + dx;
-                    let ny = y as isize + dy;
-                    if nx >= 0
-                        && ny >= 0
-                        && nx < grid[y].len() as isize
-                        && ny < grid.len() as isize
-                        && VISITABLE.contains(&grid[ny as usize][nx as usize])
-                    {
-                        let neighbour = Pos {
-                            x: nx as usize,
-                            y: ny as usize,
-                        };
-                        if results.contains(&(neighbour, start)) {
-                            return;
-                        }
-                        results.insert((start, neighbour));
-                    }
-                });
         }
     }
 
-    results
+    positions
+}
+
+fn shortcuts_from(
+    n: NodeIndex<u32>,
+    grid: &Vec<Vec<char>>,
+    graph: &G,
+    nidx: &HashMap<Pos, NodeIndex>,
+    cost_to_nodes: &HashMap<NodeIndex, i32>,
+) -> i32 {
+    let cur_pos = graph.node_weight(n).unwrap();
+    let cur_cost = cost_to_nodes[&n];
+
+    if cur_cost < 100 {
+        return 0;
+    }
+
+    let mut count_good_skips = 0;
+
+    // todo set to 20
+    for (x, y) in find_positions_within_distance(cur_pos.x as i32, cur_pos.y as i32, 20) {
+        if x >= 0 && y >= 0 && y < grid.len() as i32 && x < grid[y as usize].len() as i32 {
+            let skip_pos = Pos {
+                x: x as usize,
+                y: y as usize,
+            };
+            let dist = cityblock_distance(
+                cur_pos.x as i32,
+                cur_pos.y as i32,
+                skip_pos.x as i32,
+                skip_pos.y as i32,
+            );
+            if VISITABLE.contains(&grid[skip_pos.y][skip_pos.x]) {
+                let cost_to_skip_node = cost_to_nodes[&nidx[&skip_pos]];
+                println!("{cur_cost} - {cost_to_skip_node} >= 100",);
+                // - dist as it costs to get to the skip pos
+                if cur_cost - cost_to_skip_node - dist >= 100 {
+                    println!("YES");
+                    count_good_skips += 1;
+                }
+            }
+        }
+    }
+
+    count_good_skips
 }
 
 fn main() {
@@ -171,29 +163,26 @@ fn main() {
     let grid = parse(filename);
     let (graph, nidx) = graph_for(&grid);
     let (start, end) = start_and_end(&grid);
-    let skips = find_skips(&grid);
 
-    println!("found {} skips", skips.len());
+    let cost_to_nodes = dijkstra(&graph, nidx[&end], None, |_| 1);
+    let (min_cost, shortest_path) = astar(
+        &graph,
+        nidx[&start],
+        |finish| finish == nidx[&end],
+        |_| 1,
+        |_| 0,
+    )
+    .unwrap();
+    println!("min_cost {}", min_cost);
+    // println!("{:?}", cost_to_nodes);
+    // println!("{:?}", shortest_path);
 
-    let baseline = shortest_path(graph.clone(), &nidx, (start, end), None);
+    let count_shortcuts: i32 = shortest_path
+        .iter()
+        .map(|n| shortcuts_from(*n, &grid, &graph, &nidx, &cost_to_nodes))
+        .sum();
 
-    println!("baseline {}", baseline);
-
-    let i = AtomicI32::new(0);
-
-    let good_skips = skips
-        .par_iter()
-        .filter(|skip| {
-            let cost = shortest_path(graph.clone(), &nidx, (start, end), Some(**skip));
-            // println!("with skip {:?} -> {}", skip, cost);
-            let cur = i.fetch_add(1, Ordering::SeqCst);
-            println!("{} -> skip cost: {}", cur, cost);
-            // baseline > cost
-            (baseline - cost) >= 100
-        })
-        .count();
-
-    println!("{:?}", good_skips);
+    println!("{:?}", count_shortcuts);
 }
 
 impl Debug for Pos {
