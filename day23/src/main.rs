@@ -42,27 +42,58 @@ fn parse_edges(filepath: &str) -> Vec<Edge> {
     edges
 }
 
-type Parents = HashMap<String, String>;
-fn find(node: &str, parents: &Parents) -> String {
-    if parents[node] != node {
-        return find(&parents[node], parents);
-    }
-    node.to_string()
-}
-
-fn union_find(edges: &[Edge]) -> Parents {
-    let mut parents = Parents::new();
-
-    for edge in edges {
-        parents.insert(edge.to.clone(), edge.to.clone());
-        parents.insert(edge.from.clone(), edge.from.clone());
-    }
-
-    for edge in edges {
-        parents.insert(find(&edge.to, &parents), find(&edge.from, &parents));
+fn bron_kerbosch_v2(
+    r: &HashSet<String>,
+    p: &mut HashSet<String>,
+    x: &mut HashSet<String>,
+    g: &HashMap<String, HashSet<String>>,
+    cliques: &mut Vec<Vec<String>>,
+) {
+    if p.is_empty() && x.is_empty() {
+        if r.len() > 2 {
+            let mut clique: Vec<String> = r.iter().cloned().collect();
+            clique.sort();
+            cliques.push(clique);
+        }
+        return;
     }
 
-    parents
+    // Choose a pivot with the maximum degree in P ∪ X
+    let pivot = p
+        .union(x)
+        .max_by_key(|v| g.get(*v).map_or(0, |neighbors| neighbors.len()))
+        .cloned();
+
+    if let Some(pivot_vertex) = pivot {
+        let neighbors = g.get(&pivot_vertex).cloned().unwrap_or_default();
+        let candidates: Vec<String> = p.difference(&neighbors).cloned().collect();
+
+        for v in candidates {
+            // New R is R ∪ {v}
+            let mut new_r = r.clone();
+            new_r.insert(v.clone());
+
+            // New P is P ∩ N(v)
+            let neighbors_v = g.get(&v).cloned().unwrap_or_default();
+            let mut new_p = p
+                .intersection(&neighbors_v)
+                .cloned()
+                .collect::<HashSet<String>>();
+
+            // New X is X ∩ N(v)
+            let mut new_x = x
+                .intersection(&neighbors_v)
+                .cloned()
+                .collect::<HashSet<String>>();
+
+            // Recursive call
+            bron_kerbosch_v2(&new_r, &mut new_p, &mut new_x, g, cliques);
+
+            // Move v from P to X
+            p.remove(&v);
+            x.insert(v);
+        }
+    }
 }
 
 fn main() {
@@ -70,27 +101,32 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let filepath = &args[1];
 
-    let edges = parse_edges(filepath)
-        .into_iter()
-        .into_group_map_by(|e| e.from.clone());
-    let edges_set: HashSet<Edge> = edges.iter().flat_map(|e| e.1.clone()).collect();
+    let edges = parse_edges(filepath);
 
-    let mut result = vec![];
-    for (from, edges) in edges {
-        if from.starts_with('t') {
-            for comb in edges.iter().combinations(2) {
-                if edges_set.contains(&Edge {
-                    from: comb[0].to.clone(),
-                    to: comb[1].to.clone(),
-                }) {
-                    let mut cc = vec![from.clone(), comb[0].to.clone(), comb[1].to.clone()];
-                    cc.sort();
-                    result.push(cc);
-                }
-            }
-        }
+    // Build the graph as an adjacency list
+    let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
+    for edge in edges.iter() {
+        graph
+            .entry(edge.from.to_string())
+            .or_insert_with(HashSet::new)
+            .insert(edge.to.to_string());
     }
-    result = result.iter().unique().cloned().collect_vec();
-    println!("{:?}", result);
-    println!("{}", result.len());
+
+    // Initialize R, P, X
+    let r: HashSet<String> = HashSet::new();
+    let mut p: HashSet<String> = graph.keys().cloned().collect();
+    let mut x: HashSet<String> = HashSet::new();
+
+    // Collect cliques
+    let mut cliques: Vec<Vec<String>> = Vec::new();
+    bron_kerbosch_v2(&r, &mut p, &mut x, &graph, &mut cliques);
+
+    // Sort the cliques for consistent output
+    let mut sorted_cliques = cliques.clone();
+    sorted_cliques.sort();
+
+    // Print each clique
+    for clique in sorted_cliques {
+        println!("{}", clique.join(", "));
+    }
 }
