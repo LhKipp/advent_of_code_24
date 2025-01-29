@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     fs::File,
     io::{self, BufRead},
@@ -108,95 +108,34 @@ fn main() {
     let filepath = &args[1];
 
     let (mut wire_values, mut gates) = parse_input(filepath);
-    // gates.sort_by(|a, b| a.output.cmp(&b.output));
 
-    let mut subs: HashMap<String, Sub> = HashMap::new();
-    subs.insert("qkm".into(), Sub::c(0));
-    // subs.insert("c0".into(), "qkm".into());
-    let mut falsy_assignments: Vec<String> = vec![];
-
-    // find all x_xor_y and x_and_y
-    for gate in &mut gates {
-        if gate.left_input.starts_with('x') || gate.right_input.starts_with('x') {
-            assert!(gate.right_input.starts_with('y') || gate.left_input.starts_with('y'));
-            let num_left = gate.left_input[1..].parse::<i32>().unwrap();
-            let num_right = gate.right_input[1..].parse::<i32>().unwrap();
-            assert!(num_left == num_right);
-            if gate.op == Op::Xor {
-                subs.insert(gate.output.clone(), Sub::x_xor_y(num_left));
-            } else if gate.op == Op::And {
-                subs.insert(gate.output.clone(), Sub::x_and_y(num_left));
-            } else {
-                unreachable!()
-            }
-            gate.handled = true
+    let mut falsy = HashSet::new();
+    for gate in gates {
+        if gate.output.starts_with('z') && gate.op!= Op::Xor && gate.output != "z45" {
+            falsy.insert(gate.output);
+        }
+        if gate.op == Op::Xor && 
+            ((!['y', 'x'].contains(gate.left_input[0]) && !['y', 'x'].contains(gate.right_input[0]))
+            || !gate.output.starts_with('z')) {
+            falsy.push(gate.output);
         }
     }
-
-    loop {
-        for gate in &mut gates {
-            if gate.left_input.starts_with('x') || gate.right_input.starts_with('x') {
-                // handled above
-                continue;
-            }
-            if gate.output == "z00" {
-                // checked manually
-                continue;
-            }
-            let left = subs.get(&gate.left_input);
-            let right = subs.get(&gate.right_input);
-            if let (Some(left), Some(right)) = (left, right) {
-                match (left, right, gate.op) {
-                    (Sub::x_xor_y(num_xor), Sub::c(num_c), Op::Xor)
-                    | (Sub::c(num_c), Sub::x_xor_y(num_xor), Op::Xor) => {
-                        if *num_c == 99 {
-                            if let Sub::c(_) = left {
-                                println!("Deduced {} to be c{}", gate.left_input, num_xor - 1);
-                                subs.insert(gate.left_input.clone(), Sub::c(num_xor - 1));
-                            } else {
-                                println!("Deduced {} to be c{}", gate.right_input, num_xor - 1);
-                                subs.insert(gate.right_input.clone(), Sub::c(num_xor - 1));
-                            }
-                            subs.insert(gate.output, Sub::Sum(*num_xor));
-                        }
-                        else if *num_c == num_xor - 1 {
-                            // all good
-                            subs.insert(gate.output, Sub::Sum(*num_xor));
-                        } else {
-                            println!("Sum XOR ({}) not having the right inputs. One xor for {} but c is for {}", gate.output ,num_xor, num_c);
-                            println!("Continuing with Unknown");
-                            subs.insert(gate.output, Sub::Sum(99));
-                        }
-                    },
-                    (Sub::c(num_c), Sub::x_xor_y(num_xor), Op::And) 
-                    | (Sub::c(num_c), Sub::x_xor_y(num_xor), Op::And) => {
-                        if *num_c == 99 {
-                            if let Sub::c(_) = left {
-                                println!("Deduced {} to be c{}", gate.left_input, num_xor - 1);
-                                subs.insert(gate.left_input.clone(), Sub::c(num_xor - 1));
-                            } else {
-                                println!("Deduced {} to be c{}", gate.right_input, num_xor - 1);
-                                subs.insert(gate.right_input.clone(), Sub::c(num_xor - 1));
-                            }
-                            subs.insert(gate.output, Sub::c_and_x_xor_y(*num_xor));
-                        }
-                        else if *num_c == num_xor - 1 {
-                            // all good
-                            subs.insert(gate.output, Sub::c_and_x_xor_y(*num_xor));
-                        } else {
-                            println!("c_and_x_xor_y ({}) not having the right inputs. One xor for {} but c is for {}", gate.output ,num_xor, num_c);
-                            println!("Continuing with Unknown");
-                            subs.insert(gate.output, Sub::Sum(99));
-                        }
-                    }
-                }
-            }
-        }
-        if gates.iter().all(|g| g.handled) {
-            break;
-        }
-    }
-}
+//     if op == "AND" and "x00" not in [op1, op2]:
+//         for subop1, subop, subop2, subres in operations:
+//             if (res == subop1 or res == subop2) and subop != "OR":
+//                 wrong.add(res)
+//     if op == "XOR":
+//         for subop1, subop, subop2, subres in operations:
+//             if (res == subop1 or res == subop2) and subop == "OR":
+//                 wrong.add(res)
+//
+// while len(operations):
+//     op1, op, op2, res = operations.pop(0)
+//     if op1 in wires and op2 in wires:
+//         wires[res] = process(op, wires[op1], wires[op2])
+//     else:
+//         operations.append((op1, op, op2, res))
+// }
 
 // for gate in gates.iter().skip(1) {
 //     // z00 manually verified
